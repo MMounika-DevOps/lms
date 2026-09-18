@@ -1,42 +1,27 @@
-pipeline {
-    agent any
+stage('Start Database') {
+    steps {
+        echo 'Starting MySQL database...'
 
-    environment {
-        // Adjust PATH to find brew packages (like python3, terraform, docker) on macOS
-        PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${env.PATH}"
-        DATABASE_URL = "mysql+pymysql://root:password@127.0.0.1:3307/eagle_lms"
-    }
+        sh '''
+            docker compose up -d db
+        '''
 
-    stages {
-        stage('Checkout') {
-            steps {
-                echo 'Checking out source code...'
-            }
-        }
+        echo 'Waiting for MySQL to become ready...'
 
-        stage('Backend Unit Tests') {
-            steps {
-                dir('backend') {
-                    sh 'python3 -m venv venv'
-                    sh './venv/bin/pip install -r requirements.txt'
-                    sh './venv/bin/pytest tests/'
-                }
-            }
-        }
+        sh '''
+            for i in $(seq 1 30); do
+                if docker compose exec -T db mysqladmin ping -h 127.0.0.1 -uroot -ppassword --silent; then
+                    echo "MySQL is ready!"
+                    exit 0
+                fi
 
-        stage('Terraform Validation') {
-            steps {
-                dir('infra') {
-                    sh 'terraform init'
-                    sh 'terraform validate'
-                }
-            }
-        }
+                echo "MySQL is not ready yet... waiting..."
+                sleep 2
+            done
 
-        stage('Docker Verify Build') {
-            steps {
-                sh 'docker compose build'
-            }
-        }
+            echo "MySQL did not become ready."
+            docker compose logs db
+            exit 1
+        '''
     }
 }
